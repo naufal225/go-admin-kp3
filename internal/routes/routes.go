@@ -1,20 +1,29 @@
 package routes
 
 import (
-    "go-admin/internal/handlers"
+	"go-admin/internal/handlers"
 
-    "github.com/gin-gonic/gin"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 )
 
 func SetupRoutes() *gin.Engine {
-    r := gin.Default()
+	r := gin.Default()
 
-    dashboardHandler := handlers.NewDashboardHandler()
+	// Setup CORS
+	config := cors.DefaultConfig()
+	config.AllowAllOrigins = true // Untuk development
+	// config.AllowOrigins = []string{"http://localhost:8000"} // Untuk production
+	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	config.AllowHeaders = []string{"Origin", "Content-Type", "Authorization"}
+	r.Use(cors.New(config))
 
-    api := r.Group("/api/v1")
-    {
-        api.GET("/admin/dashboard", dashboardHandler.GetDashboardStats)
-    }
+	dashboardHandler := handlers.NewDashboardHandler()
 
-    return r
+	api := r.Group("/api/v1")
+	{
+		api.GET("/admin/dashboard", dashboardHandler.GetDashboardStats)
+	}
+
+	return r
 }
