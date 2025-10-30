@@ -1,224 +1,177 @@
 package services
 
 import (
-    "go-admin/internal/db"
-    "go-admin/internal/models"
-    "go-admin/pkg/utils"
-    "time"
+	"go-admin/internal/db"
+	"go-admin/internal/models"
+	"go-admin/pkg/utils"
+	"time"
 )
 
 type DashboardService struct{}
 
 type DashboardStats struct {
-    TotalStudents              int                    `json:"total_students"`
-    TotalTeachers              int                    `json:"total_teachers"`
-    TotalParents               int                    `json:"total_parents"`
-    TotalActiveUsers           int                    `json:"total_active_users"`
-    ActiveIndividualChallenges int                    `json:"active_individual_challenges"`
-    ActiveGroupChallenges      int                    `json:"active_group_challenges"`
-    DoneHabits                 int                    `json:"done_habits"`
-    NotDoneHabits              int                    `json:"not_done_habits"`
-    ReflectionsToday           int                    `json:"reflections_today"`
-    ForumPostsThisWeek         int                    `json:"forum_posts_this_week"`
-    ForumCommentsThisWeek      int                    `json:"forum_comments_this_week"`
-    TopStudents                []User                 `json:"top_students"`
-    PopularBadge               *Badge                 `json:"popular_badge"`
-    RecentActivities           []Activity             `json:"recent_activities"`
-    MoodDistribution           map[string]int         `json:"mood_distribution"`
-    HabitTrends                []HabitTrend           `json:"habit_trends"`
-    ChallengeProgress          []ChallengeProgress    `json:"challenge_progress"`
-    TopClasses                 []ClassStat            `json:"top_classes"`
-    ForumStats                 ForumStats             `json:"forum_stats"`
+	TotalStudents              int                 `json:"total_students"`
+	TotalTeachers              int                 `json:"total_teachers"`
+	TotalParents               int                 `json:"total_parents"`
+	TotalActiveUsers           int                 `json:"total_active_users"`
+	ActiveIndividualChallenges int                 `json:"active_individual_challenges"`
+	ActiveGroupChallenges      int                 `json:"active_group_challenges"`
+	DoneHabits                 int                 `json:"done_habits"`
+	NotDoneHabits              int                 `json:"not_done_habits"`
+	ReflectionsToday           int                 `json:"reflections_today"`
+	TopStudents                []User              `json:"top_students"`
+	RecentActivities           []Activity          `json:"recent_activities"`
+	MoodDistribution           map[string]int      `json:"mood_distribution"`
+	HabitTrends                []HabitTrend        `json:"habit_trends"`
+	ChallengeProgress          []ChallengeProgress `json:"challenge_progress"`
+	TopClasses                 []ClassStat         `json:"top_classes"`
 }
 
 type User struct {
-    ID        uint   `json:"id"`
-    Name      string `json:"name"`
-    XP        int    `json:"xp"`
-    Level     int    `json:"level"`
-    AvatarURL string `json:"avatar_url"`
-}
-
-type Badge struct {
-    ID   uint   `json:"id"`
-    Name string `json:"name"`
+	ID        uint   `json:"id"`
+	Name      string `json:"name"`
+	XP        int    `json:"xp"`
+	Level     int    `json:"level"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 type Activity struct {
-    Type      string    `json:"type"`
-    Message   string    `json:"message"`
-    Timestamp time.Time `json:"timestamp"`
-    User      *User     `json:"user,omitempty"`
-    Badge     *Badge    `json:"badge,omitempty"`
-    XP        *int      `json:"xp,omitempty"`
+	Type      string    `json:"type"`
+	Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+	User      *User     `json:"user,omitempty"`
+	XP        *int      `json:"xp,omitempty"`
 }
 
 type HabitTrend struct {
-    Week    string `json:"week"`
-    Done    int    `json:"done"`
-    NotDone int    `json:"not_done"`
+	Week    string `json:"week"`
+	Done    int    `json:"done"`
+	NotDone int    `json:"not_done"`
 }
 
 type ChallengeProgress struct {
-    Title              string `json:"title"`
-    Type               string `json:"type"`
-    TotalParticipants  int    `json:"total_participants"`
-    CompletedParticipants int `json:"completed_participants"`
-    CompletionRate     float64 `json:"completion_rate"`
+	Title                 string  `json:"title"`
+	Type                  string  `json:"type"`
+	TotalParticipants     int     `json:"total_participants"`
+	CompletedParticipants int     `json:"completed_participants"`
+	CompletionRate        float64 `json:"completion_rate"`
 }
 
 type ClassStat struct {
-    ClassName   string `json:"class_name"`
-    AvgXP       int    `json:"avg_xp"`
-    StudentCount int   `json:"student_count"`
-}
-
-type ForumStats struct {
-    WeeklyStats []WeeklyForumStat `json:"weekly_stats"`
-    ActiveUsers []User            `json:"active_users"`
-}
-
-type WeeklyForumStat struct {
-    Week   string `json:"week"`
-    Posts  int    `json:"posts"`
-    Comments int  `json:"comments"`
+	ClassName    string `json:"class_name"`
+	AvgXP        int    `json:"avg_xp"`
+	StudentCount int    `json:"student_count"`
 }
 
 func (s *DashboardService) GetDashboardStats() *DashboardStats {
-    db := db.DB
+	db := db.DB
 
-    // 1. Basic Stats
-    var totalStudents int
-    db.Model(&models.User{}).Where("role = ?", "siswa").Count(&totalStudents)
+	// 1. Basic user stats
+	var totalStudents, totalTeachers, totalParents, totalActiveUsers int
+	db.Model(&models.User{}).Where("role = ?", "siswa").Count(&totalStudents)
+	db.Model(&models.User{}).Where("role = ?", "guru").Count(&totalTeachers)
+	db.Model(&models.User{}).Where("role = ?", "ortu").Count(&totalParents)
+	db.Model(&models.User{}).Where("role != ?", "admin").Count(&totalActiveUsers)
 
-    var totalTeachers int
-    db.Model(&models.User{}).Where("role = ?", "guru").Count(&totalTeachers)
+	// 2. Challenge stats
+	var activeIndividualChallenges, activeGroupChallenges int
+	db.Model(&models.Challenge{}).Where("type = ? AND end_date >= ?", "individual", time.Now()).Count(&activeIndividualChallenges)
+	db.Model(&models.Challenge{}).Where("type = ? AND end_date >= ?", "group", time.Now()).Count(&activeGroupChallenges)
 
-    var totalParents int
-    db.Model(&models.User{}).Where("role = ?", "ortu").Count(&totalParents)
+	// 3. Habits and reflections
+	startOfWeek := utils.StartOfWeek(time.Now())
+	endOfWeek := utils.EndOfWeek(time.Now())
 
-    var totalActiveUsers int
-    db.Model(&models.User{}).Where("role != ?", "admin").Count(&totalActiveUsers)
+	var doneHabits, notDoneHabits, reflectionsToday int
+	db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "done", startOfWeek, endOfWeek).Count(&doneHabits)
+	db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "not_done", startOfWeek, endOfWeek).Count(&notDoneHabits)
+	db.Model(&models.Reflection{}).Where("DATE(date) = ?", time.Now().Format("2006-01-02")).Count(&reflectionsToday)
 
-    var activeIndividualChallenges int
-    db.Model(&models.Challenge{}).Where("type = ? AND end_date >= ?", "individual", time.Now()).Count(&activeIndividualChallenges)
+	// 4. Top students (by XP)
+	var topStudents []models.User
+	db.Where("role = ?", "siswa").Order("xp DESC").Limit(10).Find(&topStudents)
 
-    var activeGroupChallenges int
-    db.Model(&models.Challenge{}).Where("type = ? AND end_date >= ?", "group", time.Now()).Count(&activeGroupChallenges)
+	users := make([]User, len(topStudents))
+	for i, u := range topStudents {
+		users[i] = User{
+			ID:        u.ID,
+			Name:      u.Name,
+			XP:        u.XP,
+			Level:     u.Level,
+			AvatarURL: u.AvatarURL,
+		}
+	}
 
-    startOfWeek := utils.StartOfWeek(time.Now())
-    endOfWeek := utils.EndOfWeek(time.Now())
+	// 5. Mood distribution (last 7 days)
+	moodStart := time.Now().AddDate(0, 0, -7)
+	var reflections []models.Reflection
+	db.Where("created_at >= ?", moodStart).Find(&reflections)
 
-    var doneHabits int
-    db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "done", startOfWeek, endOfWeek).Count(&doneHabits)
+	moodDistribution := map[string]int{
+		"happy":   0,
+		"neutral": 0,
+		"sad":     0,
+		"angry":   0,
+		"tired":   0,
+	}
+	for _, r := range reflections {
+		moodDistribution[r.Mood]++
+	}
 
-    var notDoneHabits int
-    db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "not_done", startOfWeek, endOfWeek).Count(&notDoneHabits)
+	// 6. Habit trends (last 5 weeks)
+	var habitTrends []HabitTrend
+	for i := 4; i >= 0; i-- {
+		start := time.Now().AddDate(0, 0, -7*i).Truncate(24 * time.Hour).AddDate(0, 0, -int(time.Now().Weekday())+1)
+		end := start.AddDate(0, 0, 6)
 
-    var reflectionsToday int
-    db.Model(&models.Reflection{}).Where("DATE(date) = ?", time.Now().Format("2006-01-02")).Count(&reflectionsToday)
+		var done, notDone int
+		db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "done", start, end).Count(&done)
+		db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "not_done", start, end).Count(&notDone)
 
-    // 2. Forum Stats
-    var forumPostsThisWeek int
-    db.Model(&models.ForumPost{}).Where("created_at BETWEEN ? AND ?", startOfWeek, endOfWeek).Count(&forumPostsThisWeek)
+		habitTrends = append(habitTrends, HabitTrend{
+			Week:    start.Format("Jan 2") + " - " + end.Format("Jan 2"),
+			Done:    done,
+			NotDone: notDone,
+		})
+	}
 
-    var forumCommentsThisWeek int
-    db.Model(&models.ForumComment{}).Where("created_at BETWEEN ? AND ?", startOfWeek, endOfWeek).Count(&forumCommentsThisWeek)
+	// 7. Recent activities (last 7 days)
+	var recentActivities []Activity
+	var challengeCompletions []models.ChallengeParticipant
+	db.Where("status = ? AND submitted_at >= ?", "completed", time.Now().AddDate(0, 0, -7)).
+		Preload("Challenge").
+		Preload("User").
+		Order("submitted_at DESC").
+		Limit(10).
+		Find(&challengeCompletions)
 
-    // 3. Top Students (by XP)
-    var topStudents []models.User
-    db.Where("role = ?", "siswa").Order("xp DESC").Limit(10).Find(&topStudents)
+	for _, c := range challengeCompletions {
+		xp := c.Challenge.XP
+		recentActivities = append(recentActivities, Activity{
+			Type:      "challenge_completion",
+			Message:   c.User.Name + " menyelesaikan Challenge " + c.Challenge.Title,
+			Timestamp: *c.SubmittedAt,
+			User: &User{
+				ID:   c.User.ID,
+				Name: c.User.Name,
+			},
+			XP: &xp,
+		})
+	}
 
-    users := make([]User, len(topStudents))
-    for i, u := range topStudents {
-        users[i] = User{
-            ID:        u.ID,
-            Name:      u.Name,
-            XP:        u.XP,
-            Level:     u.Level,
-            AvatarURL: u.AvatarURL,
-        }
-    }
-
-    // 4. Mood Distribution
-    moodStart := time.Now().AddDate(0, 0, -7) // Last 7 days
-    var reflections []models.Reflection
-    db.Where("created_at >= ?", moodStart).Find(&reflections)
-
-    moodDistribution := map[string]int{
-        "happy":   0,
-        "neutral": 0,
-        "sad":     0,
-        "angry":   0,
-        "tired":   0,
-    }
-    for _, r := range reflections {
-        moodDistribution[r.Mood]++
-    }
-
-    // 5. Habit Trends (Last 5 weeks)
-    habitTrends := []HabitTrend{}
-    for i := 4; i >= 0; i-- {
-        start := time.Now().AddDate(0, 0, -7*i).Truncate(24*time.Hour).AddDate(0, 0, -int(time.Now().Weekday())+1)
-        end := start.AddDate(0, 0, 6)
-
-        var done int
-        db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "done", start, end).Count(&done)
-
-        var notDone int
-        db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "not_done", start, end).Count(&notDone)
-
-        habitTrends = append(habitTrends, HabitTrend{
-            Week:    start.Format("Jan 2") + " - " + end.Format("Jan 2"),
-            Done:    done,
-            NotDone: notDone,
-        })
-    }
-
-    // 6. Recent Activities (Last 15)
-    var recentActivities []Activity
-
-    // Challenge completions
-    var challengeCompletions []models.ChallengeParticipant
-    db.Where("status = ? AND submitted_at >= ?", "completed", time.Now().AddDate(0, 0, -7)).
-        Preload("Challenge").
-        Preload("User").
-        Order("submitted_at DESC").
-        Limit(10).
-        Find(&challengeCompletions)
-
-    for _, c := range challengeCompletions {
-        xp := c.Challenge.XP
-        recentActivities = append(recentActivities, Activity{
-            Type:      "challenge_completion",
-            Message:   c.User.Name + " menyelesaikan Challenge " + c.Challenge.Title,
-            Timestamp: *c.SubmittedAt,
-            User: &User{
-                ID:   c.User.ID,
-                Name: c.User.Name,
-            },
-            XP: &xp,
-        })
-    }
-
-    // Sort by timestamp descending
-    // (You might want to implement custom sorting here)
-
-    return &DashboardStats{
-        TotalStudents:              totalStudents,
-        TotalTeachers:              totalTeachers,
-        TotalParents:               totalParents,
-        TotalActiveUsers:           totalActiveUsers,
-        ActiveIndividualChallenges: activeIndividualChallenges,
-        ActiveGroupChallenges:      activeGroupChallenges,
-        DoneHabits:                 doneHabits,
-        NotDoneHabits:              notDoneHabits,
-        ReflectionsToday:           reflectionsToday,
-        ForumPostsThisWeek:         forumPostsThisWeek,
-        ForumCommentsThisWeek:      forumCommentsThisWeek,
-        TopStudents:                users,
-        MoodDistribution:           moodDistribution,
-        HabitTrends:                habitTrends,
-        RecentActivities:           recentActivities,
-    }
+	return &DashboardStats{
+		TotalStudents:              totalStudents,
+		TotalTeachers:              totalTeachers,
+		TotalParents:               totalParents,
+		TotalActiveUsers:           totalActiveUsers,
+		ActiveIndividualChallenges: activeIndividualChallenges,
+		ActiveGroupChallenges:      activeGroupChallenges,
+		DoneHabits:                 doneHabits,
+		NotDoneHabits:              notDoneHabits,
+		ReflectionsToday:           reflectionsToday,
+		TopStudents:                users,
+		MoodDistribution:           moodDistribution,
+		HabitTrends:                habitTrends,
+		RecentActivities:           recentActivities,
+	}
 }
