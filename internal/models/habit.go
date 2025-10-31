@@ -7,6 +7,7 @@ type Habit struct {
     Title       string    `json:"title"`
     Description string    `json:"description"`
     UserID      uint      `json:"user_id"`
+    XP          int       `json:"xp_reward"`
     CreatedAt   time.Time `json:"created_at"`
     UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -17,5 +18,10 @@ type HabitLog struct {
     Date      time.Time `json:"date"`
     Status    string    `json:"status"` // done, not_done
     UserID    uint      `json:"user_id"`
-    CreatedAt time.Time `json:"created_at"`
+    SubmittedAt  *time.Time `json:"submitted_at"`
+    CreatedAt    time.Time  `json:"created_at"`
+
+    // Relasi
+    Habit Habit `json:"habit" gorm:"foreignKey:HabitID"`
+    User      User      `json:"user" gorm:"foreignKey:UserID"`
 }

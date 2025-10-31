@@ -83,8 +83,13 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 	endOfWeek := utils.EndOfWeek(time.Now())
 
 	var doneHabits, notDoneHabits, reflectionsToday int
-	db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "done", startOfWeek, endOfWeek).Count(&doneHabits)
-	db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "not_done", startOfWeek, endOfWeek).Count(&notDoneHabits)
+	db.Model(&models.HabitLog{}).
+		Where("status = ? AND submitted_at BETWEEN ? AND ?", "completed", startOfWeek, endOfWeek).
+		Count(&doneHabits)
+
+	db.Model(&models.HabitLog{}).
+		Where("status != ? AND submitted_at BETWEEN ? AND ?", "completed", startOfWeek, endOfWeek).
+		Count(&notDoneHabits)
 	db.Model(&models.Reflection{}).Where("DATE(date) = ?", time.Now().Format("2006-01-02")).Count(&reflectionsToday)
 
 	// 4. Top students (by XP)
@@ -121,12 +126,20 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 	// 6. Habit trends (last 5 weeks)
 	var habitTrends []HabitTrend
 	for i := 4; i >= 0; i-- {
-		start := time.Now().AddDate(0, 0, -7*i).Truncate(24 * time.Hour).AddDate(0, 0, -int(time.Now().Weekday())+1)
-		end := start.AddDate(0, 0, 6)
+		start := utils.StartOfWeek(time.Now().AddDate(0, 0, -7*i))
+		end := utils.EndOfWeek(time.Now().AddDate(0, 0, -7*i))
 
 		var done, notDone int
-		db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "done", start, end).Count(&done)
-		db.Model(&models.HabitLog{}).Where("status = ? AND date BETWEEN ? AND ?", "not_done", start, end).Count(&notDone)
+
+		// Habit selesai = completed
+		db.Model(&models.HabitLog{}).
+			Where("status = ? AND date BETWEEN ? AND ?", "completed", start, end).
+			Count(&done)
+
+		// Habit belum selesai = joined atau submitted
+		db.Model(&models.HabitLog{}).
+			Where("status IN (?) AND date BETWEEN ? AND ?", []string{"joined", "submitted"}, start, end).
+			Count(&notDone)
 
 		habitTrends = append(habitTrends, HabitTrend{
 			Week:    start.Format("Jan 2") + " - " + end.Format("Jan 2"),
@@ -154,6 +167,28 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 			User: &User{
 				ID:   c.User.ID,
 				Name: c.User.Name,
+			},
+			XP: &xp,
+		})
+	}
+
+	var habitCompletions []models.HabitLog
+	db.Where("status = ? AND created_at >= ?", "completed", time.Now().AddDate(0, 0, -7)).
+		Preload("Habit").
+		Preload("User").
+		Order("created_at DESC").
+		Limit(10).
+		Find(&habitCompletions)
+
+	for _, h := range habitCompletions {
+		xp := h.Habit.XP
+		recentActivities = append(recentActivities, Activity{
+			Type:      "habit_completions",
+			Message:   h.User.Name + " menyelesaikan Habit " + h.Habit.Title,
+			Timestamp: *h.SubmittedAt,
+			User: &User{
+				ID:   h.User.ID,
+				Name: h.User.Name,
 			},
 			XP: &xp,
 		})
