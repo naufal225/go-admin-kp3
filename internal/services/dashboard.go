@@ -63,6 +63,28 @@ type ClassStat struct {
 	StudentCount int    `json:"student_count"`
 }
 
+// Helper function to safely get timestamp
+func safeGetTimestamp(submittedAt *time.Time) time.Time {
+	if submittedAt != nil {
+		return *submittedAt
+	}
+	return time.Now() // fallback to current time
+}
+
+// Helper function to safely get user info
+func safeGetUser(user models.User) *User {
+	if user.ID == 0 {
+		return nil
+	}
+	return &User{
+		ID:        user.ID,
+		Name:      user.Name,
+		XP:        user.XP,
+		Level:     user.Level,
+		AvatarURL: user.AvatarURL,
+	}
+}
+
 func (s *DashboardService) GetDashboardStats() *DashboardStats {
 	db := db.DB
 
@@ -90,6 +112,7 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 	db.Model(&models.HabitLog{}).
 		Where("status != ? AND submitted_at BETWEEN ? AND ?", "completed", startOfWeek, endOfWeek).
 		Count(&notDoneHabits)
+
 	db.Model(&models.Reflection{}).Where("DATE(date) = ?", time.Now().Format("2006-01-02")).Count(&reflectionsToday)
 
 	// 4. Top students (by XP)
@@ -120,7 +143,9 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 		"tired":   0,
 	}
 	for _, r := range reflections {
-		moodDistribution[r.Mood]++
+		if r.Mood != "" {
+			moodDistribution[r.Mood]++
+		}
 	}
 
 	// 6. Habit trends (last 5 weeks)
@@ -148,8 +173,10 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 		})
 	}
 
-	// 7. Recent activities (last 7 days)
+	// 7. Recent activities (last 7 days) - FIXED SECTION
 	var recentActivities []Activity
+
+	// Challenge completions with safe pointer handling
 	var challengeCompletions []models.ChallengeParticipant
 	db.Where("status = ? AND submitted_at >= ?", "completed", time.Now().AddDate(0, 0, -7)).
 		Preload("Challenge").
@@ -159,19 +186,22 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 		Find(&challengeCompletions)
 
 	for _, c := range challengeCompletions {
+		// Skip if essential data is missing
+		if c.User.ID == 0 || c.Challenge.ID == 0 {
+			continue
+		}
+
 		xp := c.Challenge.XP
 		recentActivities = append(recentActivities, Activity{
 			Type:      "challenge_completion",
 			Message:   c.User.Name + " menyelesaikan Challenge " + c.Challenge.Title,
-			Timestamp: *c.SubmittedAt,
-			User: &User{
-				ID:   c.User.ID,
-				Name: c.User.Name,
-			},
-			XP: &xp,
+			Timestamp: safeGetTimestamp(c.SubmittedAt), // Safe timestamp access
+			User:      safeGetUser(c.User),             // Safe user access
+			XP:        &xp,
 		})
 	}
 
+	// Habit completions with safe pointer handling
 	var habitCompletions []models.HabitLog
 	db.Where("status = ? AND created_at >= ?", "completed", time.Now().AddDate(0, 0, -7)).
 		Preload("Habit").
@@ -181,16 +211,18 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 		Find(&habitCompletions)
 
 	for _, h := range habitCompletions {
+		// Skip if essential data is missing
+		if h.User.ID == 0 || h.Habit.ID == 0 {
+			continue
+		}
+
 		xp := h.Habit.XP
 		recentActivities = append(recentActivities, Activity{
-			Type:      "habit_completions",
+			Type:      "habit_completion", // Fixed typo from "habit_completions"
 			Message:   h.User.Name + " menyelesaikan Habit " + h.Habit.Title,
-			Timestamp: *h.SubmittedAt,
-			User: &User{
-				ID:   h.User.ID,
-				Name: h.User.Name,
-			},
-			XP: &xp,
+			Timestamp: safeGetTimestamp(h.SubmittedAt), // Safe timestamp access
+			User:      safeGetUser(h.User),             // Safe user access
+			XP:        &xp,
 		})
 	}
 
