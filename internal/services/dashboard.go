@@ -1,10 +1,14 @@
 package services
 
 import (
+	"strings"
+	"time"
+
 	"go-admin/internal/db"
 	"go-admin/internal/models"
 	"go-admin/pkg/utils"
-	"time"
+
+	"github.com/jinzhu/gorm"
 )
 
 type DashboardService struct{}
@@ -85,39 +89,86 @@ func safeGetUser(user models.User) *User {
 	}
 }
 
-func (s *DashboardService) GetDashboardStats() *DashboardStats {
-	db := db.DB
+type dateRange struct {
+	start   time.Time
+	end     time.Time
+	enabled bool
+}
+
+// resolveDateRange normalizes the requested period and returns a time range.
+// Default is the current week to maintain previous behavior.
+func resolveDateRange(period string, now time.Time) dateRange {
+	p := strings.ToLower(strings.TrimSpace(period))
+
+	switch p {
+	case "", "minggu ini", "minggu-ini", "minggu":
+		start := utils.StartOfWeek(now)
+		end := utils.EndOfWeek(now).AddDate(0, 0, 1).Add(-time.Nanosecond)
+		return dateRange{start: start, end: end, enabled: true}
+	case "bulan ini", "bulan-ini", "bulan":
+		start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		end := start.AddDate(0, 1, 0).Add(-time.Nanosecond)
+		return dateRange{start: start, end: end, enabled: true}
+	case "tahun ini", "tahun-ini", "tahun":
+		start := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
+		end := start.AddDate(1, 0, 0).Add(-time.Nanosecond)
+		return dateRange{start: start, end: end, enabled: true}
+	case "semua", "all", "semua data":
+		return dateRange{enabled: false}
+	default:
+		start := utils.StartOfWeek(now)
+		end := utils.EndOfWeek(now).AddDate(0, 0, 1).Add(-time.Nanosecond)
+		return dateRange{start: start, end: end, enabled: true}
+	}
+}
+
+func applyDateRange(query *gorm.DB, rng dateRange, column string) *gorm.DB {
+	if !rng.enabled {
+		return query
+	}
+	return query.Where(column+" BETWEEN ? AND ?", rng.start, rng.end)
+}
+
+func (s *DashboardService) GetDashboardStats(period string) *DashboardStats {
+	database := db.DB
+	now := time.Now()
+	rng := resolveDateRange(period, now)
 
 	// 1. Basic user stats
 	var totalStudents, totalTeachers, totalParents, totalActiveUsers int
-	db.Model(&models.User{}).Where("role = ?", "siswa").Count(&totalStudents)
-	db.Model(&models.User{}).Where("role = ?", "guru").Count(&totalTeachers)
-	db.Model(&models.User{}).Where("role = ?", "ortu").Count(&totalParents)
-	db.Model(&models.User{}).Where("role != ?", "admin").Count(&totalActiveUsers)
+	database.Model(&models.User{}).Where("role = ?", "siswa").Count(&totalStudents)
+	database.Model(&models.User{}).Where("role = ?", "guru").Count(&totalTeachers)
+	database.Model(&models.User{}).Where("role = ?", "ortu").Count(&totalParents)
+	database.Model(&models.User{}).Where("role != ?", "admin").Count(&totalActiveUsers)
 
 	// 2. Challenge stats
 	var activeIndividualChallenges, activeGroupChallenges int
-	db.Model(&models.Challenge{}).Where("type = ? AND end_date >= ?", "individual", time.Now()).Count(&activeIndividualChallenges)
-	db.Model(&models.Challenge{}).Where("type = ? AND end_date >= ?", "group", time.Now()).Count(&activeGroupChallenges)
+	database.Model(&models.Challenge{}).Where("type = ? AND end_date >= ?", "individual", now).Count(&activeIndividualChallenges)
+	database.Model(&models.Challenge{}).Where("type = ? AND end_date >= ?", "group", now).Count(&activeGroupChallenges)
 
 	// 3. Habits and reflections
-	startOfWeek := utils.StartOfWeek(time.Now())
-	endOfWeek := utils.EndOfWeek(time.Now())
-
 	var doneHabits, notDoneHabits, reflectionsToday int
-	db.Model(&models.HabitLog{}).
-		Where("status = ? AND submitted_at BETWEEN ? AND ?", "completed", startOfWeek, endOfWeek).
-		Count(&doneHabits)
+	applyDateRange(
+		database.Model(&models.HabitLog{}).Where("status = ?", "completed"),
+		rng,
+		"submitted_at",
+	).Count(&doneHabits)
 
-	db.Model(&models.HabitLog{}).
-		Where("status != ? AND submitted_at BETWEEN ? AND ?", "completed", startOfWeek, endOfWeek).
-		Count(&notDoneHabits)
+	applyDateRange(
+		database.Model(&models.HabitLog{}).Where("status != ?", "completed"),
+		rng,
+		"submitted_at",
+	).Count(&notDoneHabits)
 
-	db.Model(&models.Reflection{}).Where("DATE(date) = ?", time.Now().Format("2006-01-02")).Count(&reflectionsToday)
+	applyDateRange(
+		database.Model(&models.Reflection{}),
+		rng,
+		"date",
+	).Count(&reflectionsToday)
 
 	// 4. Top students (by XP)
 	var topStudents []models.User
-	db.Where("role = ?", "siswa").Order("xp DESC").Limit(10).Find(&topStudents)
+	database.Where("role = ?", "siswa").Order("xp DESC").Limit(10).Find(&topStudents)
 
 	users := make([]User, len(topStudents))
 	for i, u := range topStudents {
@@ -130,10 +181,13 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 		}
 	}
 
-	// 5. Mood distribution (last 7 days)
-	moodStart := time.Now().AddDate(0, 0, -7)
+	// 5. Mood distribution (period-aware)
 	var reflections []models.Reflection
-	db.Where("created_at >= ?", moodStart).Find(&reflections)
+	applyDateRange(
+		database.Model(&models.Reflection{}),
+		rng,
+		"created_at",
+	).Find(&reflections)
 
 	moodDistribution := map[string]int{
 		"happy":   0,
@@ -148,23 +202,44 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 		}
 	}
 
-	// 6. Habit trends (last 5 weeks)
+	// 6. Habit trends (last 5 weeks, clipped to selected range)
+	referenceDate := now
+	if rng.enabled {
+		referenceDate = rng.end
+	}
 	var habitTrends []HabitTrend
 	for i := 4; i >= 0; i-- {
-		start := utils.StartOfWeek(time.Now().AddDate(0, 0, -7*i))
-		end := utils.EndOfWeek(time.Now().AddDate(0, 0, -7*i))
+		start := utils.StartOfWeek(referenceDate.AddDate(0, 0, -7*i))
+		end := utils.EndOfWeek(referenceDate.AddDate(0, 0, -7*i)).AddDate(0, 0, 1).Add(-time.Nanosecond)
+
+		// Clamp to requested range if needed
+		if rng.enabled {
+			if end.Before(rng.start) || start.After(rng.end) {
+				continue
+			}
+			if start.Before(rng.start) {
+				start = rng.start
+			}
+			if end.After(rng.end) {
+				end = rng.end
+			}
+		}
 
 		var done, notDone int
 
 		// Habit selesai = completed
-		db.Model(&models.HabitLog{}).
-			Where("status = ? AND date BETWEEN ? AND ?", "completed", start, end).
-			Count(&done)
+		applyDateRange(
+			database.Model(&models.HabitLog{}).Where("status = ?", "completed"),
+			dateRange{start: start, end: end, enabled: true},
+			"date",
+		).Count(&done)
 
 		// Habit belum selesai = joined atau submitted
-		db.Model(&models.HabitLog{}).
-			Where("status IN (?) AND date BETWEEN ? AND ?", []string{"joined", "submitted"}, start, end).
-			Count(&notDone)
+		applyDateRange(
+			database.Model(&models.HabitLog{}).Where("status IN (?)", []string{"joined", "submitted"}),
+			dateRange{start: start, end: end, enabled: true},
+			"date",
+		).Count(&notDone)
 
 		habitTrends = append(habitTrends, HabitTrend{
 			Week:    start.Format("Jan 2") + " - " + end.Format("Jan 2"),
@@ -173,12 +248,16 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 		})
 	}
 
-	// 7. Recent activities (last 7 days) - FIXED SECTION
+	// 7. Recent activities (period-aware) - FIXED SECTION
 	var recentActivities []Activity
 
 	// Challenge completions with safe pointer handling
 	var challengeCompletions []models.ChallengeParticipant
-	db.Where("status = ? AND submitted_at >= ?", "completed", time.Now().AddDate(0, 0, -7)).
+	applyDateRange(
+		database.Where("status = ?", "completed"),
+		rng,
+		"submitted_at",
+	).
 		Preload("Challenge").
 		Preload("User").
 		Order("submitted_at DESC").
@@ -203,7 +282,11 @@ func (s *DashboardService) GetDashboardStats() *DashboardStats {
 
 	// Habit completions with safe pointer handling
 	var habitCompletions []models.HabitLog
-	db.Where("status = ? AND created_at >= ?", "completed", time.Now().AddDate(0, 0, -7)).
+	applyDateRange(
+		database.Where("status = ?", "completed"),
+		rng,
+		"submitted_at",
+	).
 		Preload("Habit").
 		Preload("User").
 		Order("created_at DESC").
